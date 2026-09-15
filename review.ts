@@ -392,34 +392,39 @@ async function hasPendingChanges(pi: ExtensionAPI): Promise<boolean> {
 }
 
 /**
- * Parse a PR reference (URL or number) and return the PR number
+ * Parse a PR reference, keeping URLs intact so gh targets the requested repository.
  */
-function parsePrReference(ref: string): number | null {
+function parsePrReference(ref: string): { prNumber: number; ref: string } | null {
 	const trimmed = ref.trim();
 
-	// Try as a number first
-	const num = parseInt(trimmed, 10);
-	if (!isNaN(num) && num > 0) {
-		return num;
+	// Bare numbers intentionally use gh's default repository.
+	if (/^\d+$/.test(trimmed)) {
+		const prNumber = Number(trimmed);
+		return Number.isSafeInteger(prNumber) && prNumber > 0
+			? { prNumber, ref: String(prNumber) }
+			: null;
 	}
 
-	// Try to extract from GitHub URL
 	// Formats: https://github.com/owner/repo/pull/123
 	//          github.com/owner/repo/pull/123
-	const urlMatch = trimmed.match(/github\.com\/[^/]+\/[^/]+\/pull\/(\d+)/);
-	if (urlMatch) {
-		return parseInt(urlMatch[1], 10);
-	}
+	const urlMatch = trimmed.match(/^(?:https?:\/\/)?github\.com\/[^/\s?#]+\/[^/\s?#]+\/pull\/(\d+)(?:[/?#]\S*)?$/);
+	if (!urlMatch) return null;
 
-	return null;
+	const prNumber = Number(urlMatch[1]);
+	if (!Number.isSafeInteger(prNumber) || prNumber <= 0) return null;
+
+	return {
+		prNumber,
+		ref: trimmed.startsWith("github.com/") ? `https://${trimmed}` : trimmed,
+	};
 }
 
 /**
  * Get PR information from GitHub CLI
  */
-async function getPrInfo(pi: ExtensionAPI, prNumber: number): Promise<{ baseBranch: string; title: string; headBranch: string } | null> {
+async function getPrInfo(pi: ExtensionAPI, ref: string): Promise<{ baseBranch: string; title: string; headBranch: string } | null> {
 	const { stdout, code } = await pi.exec("gh", [
-		"pr", "view", String(prNumber),
+		"pr", "view", ref,
 		"--json", "baseRefName,title,headRefName",
 	]);
 
@@ -440,8 +445,8 @@ async function getPrInfo(pi: ExtensionAPI, prNumber: number): Promise<{ baseBran
 /**
  * Checkout a PR using GitHub CLI
  */
-async function checkoutPr(pi: ExtensionAPI, prNumber: number): Promise<{ success: boolean; error?: string }> {
-	const { stdout, stderr, code } = await pi.exec("gh", ["pr", "checkout", String(prNumber)]);
+async function checkoutPr(pi: ExtensionAPI, ref: string): Promise<{ success: boolean; error?: string }> {
+	const { stdout, stderr, code } = await pi.exec("gh", ["pr", "checkout", ref]);
 
 	if (code !== 0) {
 		return { success: false, error: stderr || stdout || "Failed to checkout PR" };
@@ -614,14 +619,15 @@ export default function reviewExtension(pi: ExtensionAPI) {
 			return null;
 		}
 
-		const prNumber = parsePrReference(ref);
-		if (!prNumber) {
+		const prReference = parsePrReference(ref);
+		if (!prReference) {
 			ctx.ui.notify("Invalid PR reference. Enter a number or GitHub PR URL.", "error");
 			return null;
 		}
+		const { prNumber, ref: ghRef } = prReference;
 
 		ctx.ui.notify(`Fetching PR #${prNumber} info...`, "info");
-		const prInfo = await getPrInfo(pi, prNumber);
+		const prInfo = await getPrInfo(pi, ghRef);
 
 		if (!prInfo) {
 			ctx.ui.notify(
@@ -638,7 +644,7 @@ export default function reviewExtension(pi: ExtensionAPI) {
 		}
 
 		ctx.ui.notify(`Checking out PR #${prNumber}...`, "info");
-		const checkoutResult = await checkoutPr(pi, prNumber);
+		const checkoutResult = await checkoutPr(pi, ghRef);
 
 		if (!checkoutResult.success) {
 			ctx.ui.notify(`Failed to checkout PR: ${checkoutResult.error}`, "error");

@@ -30,6 +30,7 @@
     "typescript": "^5.8.3"
   },
   "scripts": {
+    "test": "node --test review.test.ts",
     "typecheck": "tsc --noEmit"
   }
 }

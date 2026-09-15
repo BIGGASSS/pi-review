@@ -34,6 +34,9 @@ It also supports custom shared instructions that are loaded from `REVIEW_GUIDELI
 /review branch main --extra "focus on performance and error handling"
 ```
 
+PR URLs target the repository in the URL for both lookup and checkout, even when
+`gh` defaults to an upstream repository. Bare PR numbers use `gh`'s default repository.
+
 When a review session is active, finish it with:
 
 ```bash
@@ -41,3 +44,13 @@ When a review session is active, finish it with:
 ```
 
 You can then return only, return + summarize, or return + queue fixing work.
+
+## Development
+
+With Node.js 22.18+:
+
+```bash
+npm ci
+npm test
+npm run typecheck
+```
